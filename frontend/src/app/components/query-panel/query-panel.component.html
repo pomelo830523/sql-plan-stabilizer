@@ -1,0 +1,130 @@
+<section class="card">
+  <h2 class="card-title">查詢條件</h2>
+
+  <div class="preset-bar">
+    <span>快速填入：</span>
+    <button *ngFor="let n of PRESET_OPTIONS"
+            (click)="addPresetRows(n)"
+            [class.active]="casesArray.length === n">
+      {{ n }} 筆
+    </button>
+  </div>
+
+  <form [formGroup]="form" (ngSubmit)="runAll()">
+    <div class="field-row">
+      <label>Sort No</label>
+      <input type="number" formControlName="sortNo" min="1" />
+    </div>
+
+    <table class="key-table">
+      <thead>
+        <tr><th>#</th><th>Lot ID</th><th>Case ID</th><th></th></tr>
+      </thead>
+      <tbody formArrayName="cases">
+        <tr *ngFor="let row of visibleControls; let i = index" [formGroupName]="i">
+          <td class="idx">{{ i + 1 }}</td>
+          <td><input formControlName="lotId"  placeholder="e.g. LOT00001.W01" /></td>
+          <td><input formControlName="caseId" placeholder="e.g. CASE_00001" /></td>
+          <td>
+            <button type="button" class="btn-remove" (click)="removeRow(i)"
+                    [disabled]="casesArray.length === 1">✕</button>
+          </td>
+        </tr>
+        <tr *ngIf="casesArray.length > TABLE_DISPLAY_LIMIT" class="hidden-rows-hint">
+          <td colspan="4">
+            ⋯ 僅顯示前 {{ TABLE_DISPLAY_LIMIT }} 筆，其餘 {{ casesArray.length - TABLE_DISPLAY_LIMIT }} 筆已隱藏（查詢時全部送出）
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="table-actions">
+      <button type="button" class="btn-secondary" (click)="addRow()">+ 新增一列</button>
+      <span class="hint">共 {{ casesArray.length }} 筆</span>
+    </div>
+
+    <button type="submit" class="btn-primary" [disabled]="form.invalid || loading">
+      {{ loading ? '查詢中...' : '執行四種方式並比較' }}
+    </button>
+  </form>
+</section>
+
+<div *ngIf="errorMsg" class="error-box">{{ errorMsg }}</div>
+
+<!-- ── 四方法比較 ── -->
+<div *ngIf="results.length" class="compare-grid">
+  <section *ngFor="let r of results" class="card result-card">
+
+    <h2 class="card-title">
+      {{ r.label }}
+      <span class="tag" [ngClass]="r.tagClass">{{ r.response.mode }}</span>
+    </h2>
+
+    <div class="stat-row">
+      <div class="stat time-stat" [class.fastest]="r.response.executionTimeMs === fastest()">
+        <div class="stat-label">執行時間</div>
+        <div class="stat-value">{{ r.response.executionTimeMs }} ms</div>
+        <div class="speedup" *ngIf="speedup(r.response.executionTimeMs)">
+          {{ speedup(r.response.executionTimeMs) }}
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">輸入筆數</div>
+        <div class="stat-value">{{ r.response.inputSize }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Batch 大小</div>
+        <div class="stat-value">{{ r.response.bucketSize }}</div>
+      </div>
+      <div class="stat" *ngIf="r.response.batchCount > 0">
+        <div class="stat-label">批次數</div>
+        <div class="stat-value">{{ r.response.batchCount }}</div>
+      </div>
+      <div class="stat" *ngIf="r.response.dbRoundTrips > 0">
+        <div class="stat-label">DB Round Trips</div>
+        <div class="stat-value">{{ r.response.dbRoundTrips }}</div>
+      </div>
+    </div>
+
+    <div class="note" [ngClass]="r.noteClass">{{ r.response.note }}</div>
+  </section>
+</div>
+
+<!-- ── 原理說明 ── -->
+<section class="card explain">
+  <h2 class="card-title">四種方法對比</h2>
+  <table class="compare-table">
+    <thead>
+      <tr>
+        <th>方法</th>
+        <th>Plan 穩定</th>
+        <th>幾千萬筆效益</th>
+        <th>DB Round Trips</th>
+        <th>上限</th>
+        <th>關鍵差異</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="row-bad">
+        <td>① 原始版本</td>
+        <td>✗ 不穩定</td><td>差</td><td>1</td><td>無（每次不同）</td>
+        <td>variable placeholder → hard-parse</td>
+      </tr>
+      <tr class="row-warn">
+        <td>② Fixed Bucket</td>
+        <td>✓</td><td>普通</td><td>1</td><td>2000 筆</td>
+        <td>哨兵值填補，仍有 function-based JOIN</td>
+      </tr>
+      <tr class="row-ok">
+        <td>③ Plan A</td>
+        <td>✓</td><td>普通</td><td>N 批</td><td>無限</td>
+        <td>固定批次 100，SQL 永遠相同，無上限</td>
+      </tr>
+      <tr class="row-best">
+        <td>④ Plan A+C</td>
+        <td>✓</td><td>最佳</td><td>N×2 批</td><td>無限</td>
+        <td>Java 預算 WAFER_ID，CP_WFRYLD 走 index，消除 function-based JOIN</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
