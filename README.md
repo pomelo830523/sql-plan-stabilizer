@@ -76,6 +76,99 @@ return prefix + suffix;
 
 ---
 
+## Oracle Hint 使用指南
+
+Hint 讓你**覆蓋 CBO（Cost-Based Optimizer）的判斷**，加之前必須先確認 CBO 目前做了什麼錯誤決定，不能盲猜。
+
+### Step 1：取得實際執行計畫
+
+```sql
+-- 方法一：EXPLAIN PLAN（預估，不實際執行）
+EXPLAIN PLAN FOR
+SELECT S.Lot_id, S.Case_Id, SUM(...) FROM ...;
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, NULL, 'TYPICAL'));
+
+-- 方法二：GATHER_PLAN_STATISTICS（真實執行，可比對 E-Rows vs A-Rows）
+SELECT /*+ GATHER_PLAN_STATISTICS */
+    S.Lot_id, S.Case_Id, SUM(...) FROM ...;
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(NULL, NULL, 'ALLSTATS LAST'));
+```
+
+**重點**：找 E-Rows（預估）vs A-Rows（實際）差距大的步驟，差越多代表 CBO 越誤判，那裡就最需要 hint。
+
+### Step 2：三個關鍵決策點
+
+#### 決策一：JOIN 順序
+
+最佳順序：先用 IN 子句過濾 `WAFER_SUM`（結果集最小），再 join 小表 `LOT_WIP`，最後才碰大表 `CP_WFRYLD`。
+
+```sql
+SELECT /*+ LEADING(S L Y) */ ...
+```
+
+#### 決策二：JOIN 方法
+
+| 情境 | 適合 Hint |
+|---|---|
+| 驅動表結果集小，被 join 表有 index | `USE_NL(L)` / `USE_NL(Y)` |
+| 兩表都很大，沒有好 index | `USE_HASH(Y)` |
+| 有排序需求（ORDER BY） | `USE_MERGE(Y)` |
+
+```sql
+SELECT /*+ LEADING(S L Y) USE_NL(L) USE_NL(Y) */ ...
+```
+
+#### 決策三：Index 使用
+
+若 CBO 選擇 Full Table Scan 而 index 確實存在：
+
+```sql
+-- 指定 index 名稱
+SELECT /*+ INDEX(S idx_wafer_sum_lot_case) INDEX(Y idx_cp_wfryld_wafer_id) */ ...
+
+-- 只指定表，讓 Oracle 選哪個 index
+SELECT /*+ INDEX(S) INDEX(Y) */ ...
+```
+
+### Step 3：其他常用 Hint
+
+| Hint | 用途 | 適用時機 |
+|---|---|---|
+| `RESULT_CACHE` | 快取整個查詢結果 | 相同 key 會重複查詢 |
+| `PARALLEL(S 4)` | 平行掃描 | 一次撈很大量資料 |
+| `NO_MERGE` | 阻止 subquery 被展開 | 展開後 plan 反而變差 |
+| `CARDINALITY(S 100)` | 直接告訴 CBO 預估筆數 | 統計資訊嚴重失準 |
+
+### Step 4：判斷要不要加 Hint
+
+```
+執行計畫 E-Rows vs A-Rows 差 10 倍以上？
+  ├── 是 → 先請 DBA 跑 DBMS_STATS.GATHER_TABLE_STATS 更新統計資訊
+  │         若更新後仍然差 → 才加 Hint 強制指定
+  └── 否 → 不需要 hint，問題在別的地方（index 缺失、SQL 寫法、lock）
+```
+
+> **注意**：Hint 寫死在 SQL 裡，資料量或 index 結構改變後可能變成拖累，需定期 review。
+
+### 在本專案設定 Hint
+
+在 `backend/src/main/resources/application.properties` 修改：
+
+```properties
+# 留空 = 不加 hint（預設）
+query.hint=
+
+# 範例：強制 JOIN 順序 + NL join + 走 index
+query.hint=LEADING(S L Y) USE_NL(L) USE_NL(Y) INDEX(S) INDEX(Y)
+
+# 範例：大表改用 Hash Join
+query.hint=LEADING(S L Y) USE_HASH(Y) INDEX(S)
+```
+
+Hint 會自動套用到方法一～三的主查詢（`SELECT /*+ ... */ ...`），重啟後端即生效。
+
+---
+
 ## 技術架構
 
 ```

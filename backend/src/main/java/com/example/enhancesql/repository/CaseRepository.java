@@ -2,6 +2,7 @@ package com.example.enhancesql.repository;
 
 import com.example.enhancesql.model.CaseInfoPK;
 import com.example.enhancesql.model.QueryResponse.CaseResult;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -14,15 +15,30 @@ public class CaseRepository {
 
     // ── 常數 ──────────────────────────────────────────────────
     private static final int[]  BUCKET_SIZES = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 2000};
-    private static final int    BATCH_SIZE   = 100;   // Plan A/C 固定批次大小
+    private static final int    BATCH_SIZE   = 100;
     private static final String DUMMY_LOT    = "_DUMMY_LOT_";
     private static final String DUMMY_CASE   = "_DUMMY_CASE_";
     private static final String DUMMY_WAFER  = "_DUMMY_WAFER_";
 
     private final JdbcTemplate jdbc;
 
+    /**
+     * Oracle hint，可在 application.properties 設定：
+     *   query.hint=LEADING(S L Y) USE_NL(L) USE_NL(Y) INDEX(S) INDEX(Y)
+     *
+     * 留空代表不加 hint，讓 CBO 自行決定。
+     * 建議先用 DBMS_XPLAN 確認執行計畫後再填入。
+     */
+    @Value("${query.hint:}")
+    private String queryHint;
+
     public CaseRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    /** 供 Controller 回傳目前使用的 hint 給前端顯示 */
+    public String getActiveHint() {
+        return queryHint == null ? "" : queryHint.trim();
     }
 
     // ════════════════════════════════════════════════════════
@@ -165,7 +181,12 @@ public class CaseRepository {
     /** 原始三表 JOIN（方法一、二、三共用） */
     private String buildMainSql(int slots) {
         StringBuilder sb = new StringBuilder();
-        sb.append("SELECT S.LOT_ID, S.CASE_ID, ");
+        // hint 非空時插入 /*+ ... */，方便對照有無 hint 的執行計畫差異
+        if (getActiveHint().isEmpty()) {
+            sb.append("SELECT S.LOT_ID, S.CASE_ID, ");
+        } else {
+            sb.append("SELECT /*+ ").append(getActiveHint()).append(" */ S.LOT_ID, S.CASE_ID, ");
+        }
         sb.append("  SUM(DATEDIFF('SECOND', Y.END_TEST_TIME, ");
         sb.append("      COALESCE(S.ALL_INSP_DT, S.SAMPLE_INSP_DT))) AS TOTAL_TIME_DIFF ");
         sb.append("FROM WAFER_SUM S ");
