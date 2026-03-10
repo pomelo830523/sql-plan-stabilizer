@@ -20,14 +20,6 @@ sb.append("(?,?))");
 Oracle 以 **SQL 文字的 hash** 決定是否重用 execution plan。
 只要 `(?,?)` 的數量不同，Oracle 就視為全新 SQL，觸發 **hard-parse**，重新計算 execution plan，在 Shared Pool 造成 latch 競爭。
 
-原始程式碼還有三個額外 bug：
-
-| 問題 | 錯誤 | 修正 |
-|---|---|---|
-| 拼字 | `sybstr(...)` | `substr(...)` |
-| 不存在的 alias | `T.SORT_NO`（T 未定義） | `Y.SORT_NO` |
-| 缺少空格 | `...Y.type_flag"` + `"and T.SORT_NO` | 每行結尾補空格 |
-
 ---
 
 ## 四種解決方案比較
